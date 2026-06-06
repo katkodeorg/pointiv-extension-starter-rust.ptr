@@ -1,0 +1,49 @@
+name: Build WASM
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust + wasm32-wasip1 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build
+        run: cargo build --release --target wasm32-wasip1
+
+      - name: Copy binary to repo root
+        run: cp target/wasm32-wasip1/release/extension.wasm extension.wasm
+
+      - name: Print SHA-256
+        run: |
+          echo "SHA-256: $(sha256sum extension.wasm | awk '{print $1}')"
+          echo "Size: $(wc -c < extension.wasm) bytes"
+
+      - name: Commit updated extension.wasm
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "build: update extension.wasm [ci skip]"
+          file_pattern: extension.wasm
