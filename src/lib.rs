@@ -2,16 +2,33 @@
 //!
 //! Default: greet and count runs in storage.
 //! Try these commands in the popup:
-//!   `http`     - GET https://httpbin.org/get
-//!   `calendar` - create a test calendar event (title from selected text)
-//!   `gmail`    - send email: `gmail to@example.com` (body from selected text)
+//!   `http`      - GET https://httpbin.org/get
+//!   `calendar`  - create a test calendar event (title from selected text)
+//!   `gmail`     - send email: `gmail to@example.com` (body from selected text)
+//!   `todo ...`  - manage the todo list shown in the tile
+//!                 (`todo add <text>`, `todo done <n>`, `todo list`)
+//!
+//! The `render_tile` export below powers the "Todos" tile declared in
+//! pointiv-extension.json.
 
 use pointiv_extension_sdk::prelude::*;
+
+/// One todo item, stored under the "todos" storage key as a JSON array.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Todo {
+    text: String,
+    done: bool,
+}
 
 #[plugin_fn]
 pub fn execute(Json(input): Json<Input>) -> FnResult<Json<Output>> {
     let cmd = input.command.trim().to_lowercase();
 
+    if cmd == "todo" || cmd.starts_with("todo ") {
+        // Tile actions land here too: clicking "Done" on a tile row runs
+        // `todo done <n>` through this same execute function.
+        return Ok(Json(todo_command(input.command.trim())));
+    }
     if cmd == "http" {
         return Ok(Json(demo_http()));
     }
@@ -42,7 +59,7 @@ pub fn execute(Json(input): Json<Input>) -> FnResult<Json<Output>> {
     };
 
     Ok(Json(Output::text(format!(
-        "{greeting}\n\nRun #{count}. Commands: http, calendar, gmail to@example.com"
+        "{greeting}\n\nRun #{count}. Commands: todo add <text>, http, calendar, gmail to@example.com"
     ))))
 }
 
@@ -103,4 +120,107 @@ fn demo_gmail(input: &Input) -> Output {
         Ok(v) => Output::text(format!("Email sent to {to}.\n\n{v}")),
         Err(e) => Output::error(format!("Gmail failed: {e}")),
     }
+}
+
+// ── Todo list + tile ─────────────────────────────────────────────────────────
+//
+// The todo list demonstrates the tile feature end to end: `execute` mutates
+// the list in extension storage, `render_tile` reads the same storage and
+// returns a declarative TileUi for the host to draw.
+
+fn load_todos() -> Vec<Todo> {
+    storage::read_json("todos").unwrap_or_default()
+}
+
+fn save_todos(todos: &[Todo]) {
+    storage::write_json("todos", &todos);
+}
+
+/// Handle `todo add <text>`, `todo done <n>`, `todo list`.
+fn todo_command(command: &str) -> Output {
+    // Routing matched the "todo" prefix case-insensitively, so slice it off
+    // by length; strip_prefix("todo") would miss e.g. "Todo add milk".
+    let rest = command["todo".len()..].trim();
+    let (verb, arg) = match rest.split_once(char::is_whitespace) {
+        Some((v, a)) => (v, a.trim()),
+        None => (rest, ""),
+    };
+
+    match verb {
+        "add" if !arg.is_empty() => {
+            let mut todos = load_todos();
+            // Cap stored text so tile rows stay well under the host's
+            // 300-char row limit.
+            let text: String = arg.chars().take(280).collect();
+            todos.push(Todo { text: text.clone(), done: false });
+            save_todos(&todos);
+            Output::text(format!("Added todo #{}: {text}", todos.len()))
+        }
+        "done" => {
+            // Indices are 1-based positions in the stored array, the same
+            // numbering `todo list` prints and the tile rows use.
+            let mut todos = load_todos();
+            match arg.parse::<usize>() {
+                Ok(n) if n >= 1 && n <= todos.len() => {
+                    todos[n - 1].done = true;
+                    let text = todos[n - 1].text.clone();
+                    save_todos(&todos);
+                    Output::text(format!("Done: {text}"))
+                }
+                _ if todos.is_empty() => {
+                    Output::error("No todos yet. Add one with: todo add <text>".to_string())
+                }
+                _ => Output::error(format!("Usage: todo done <n> (1..{})", todos.len())),
+            }
+        }
+        "list" | "" => {
+            let todos = load_todos();
+            if todos.is_empty() {
+                return Output::text("No todos yet. Add one with: todo add <text>".to_string());
+            }
+            let lines: Vec<String> = todos
+                .iter()
+                .enumerate()
+                .map(|(i, t)| {
+                    let mark = if t.done { "[x]" } else { "[ ]" };
+                    format!("{} {} {}", i + 1, mark, t.text)
+                })
+                .collect();
+            Output::text(lines.join("\n"))
+        }
+        _ => Output::error("Usage: todo add <text> | todo done <n> | todo list".to_string()),
+    }
+}
+
+/// Render the "Todos" tile. The host calls this when the popup opens and
+/// again after a tile action runs. Only storage host calls are available
+/// here, and the render has a 3 second budget.
+#[plugin_fn]
+pub fn render_tile(Json(_input): Json<TileRenderInput>) -> FnResult<Json<TileUi>> {
+    let todos = load_todos();
+    let open = todos.iter().filter(|t| !t.done).count();
+
+    // Badge first: open count in warn, or an ok "all done" badge.
+    let mut tile = if open > 0 {
+        TileUi::new("Todos").badge(format!("{open} open"), TileTone::Warn)
+    } else {
+        TileUi::new("Todos").badge("all done", TileTone::Ok)
+    };
+
+    // Up to 5 not-done rows. Each row's action command carries the item's
+    // 1-based index in the stored array, so `todo done <n>` hits the right
+    // item even when done items sit between open ones.
+    for (index, todo) in todos.iter().enumerate().filter(|(_, t)| !t.done).take(5) {
+        // The host rejects the whole tile if any row text exceeds 300 chars,
+        // so truncate defensively (older stored todos may predate the add cap).
+        let mut text: String = todo.text.chars().take(280).collect();
+        if text.len() < todo.text.len() {
+            text.push('…');
+        }
+        tile = tile.row(
+            RowBuilder::new(text).action("Done", format!("todo done {}", index + 1)),
+        );
+    }
+
+    Ok(Json(tile.footer("Refresh", "todo list")))
 }

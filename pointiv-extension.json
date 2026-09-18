@@ -1,10 +1,11 @@
 {
   "name": "Hello World",
-  "description": "Sample Pointiv extension in Rust/WASM. Greets you, tracks a run counter. Use as a starting point for your own extension.",
-  "version": "1.0.1",
+  "description": "Sample Pointiv extension in Rust/WASM. Greets you, tracks a run counter, keeps a todo list with a popup tile. Use as a starting point for your own extension.",
+  "version": "1.1.0",
   "author": "katkodeorg",
-  "keywords": ["hello", "hello world", "greet", "greeting", "sample", "template"],
+  "keywords": ["hello", "hello world", "greet", "greeting", "sample", "template", "todo"],
   "runtime": "wasm",
   "main": "extension.wasm",
-  "permissions": ["storage", "network", "google_calendar", "google_gmail"]
+  "permissions": ["storage", "network", "google_calendar", "google_gmail"],
+  "tiles": { "height": 2, "zone": "right", "order": 1 }
 }

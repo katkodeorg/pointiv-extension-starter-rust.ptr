@@ -1,6 +1,6 @@
 [package]
 name        = "hello-world-extension"
-version     = "1.0.0"
+version     = "1.1.0"
 edition     = "2024"
 description = "Sample Pointiv community extension (WASM/Rust)"
 
@@ -17,5 +17,7 @@ panic         = "abort"
 
 [dependencies]
 extism-pdk = "1.4.1"
-pointiv-extension-sdk = "0.3"
+pointiv-extension-sdk = "0.4"
+# The Todo struct below derives Serialize/Deserialize for storage round-trips.
+serde = { version = "1", features = ["derive"] }
 
