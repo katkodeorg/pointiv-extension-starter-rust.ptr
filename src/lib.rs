@@ -222,5 +222,7 @@ pub fn render_tile(Json(_input): Json<TileRenderInput>) -> FnResult<Json<TileUi>
         );
     }
 
-    Ok(Json(tile.footer("Refresh", "todo list")))
+    Ok(Json(tile
+        .footer_input("Add", "todo add", "New todo")
+        .footer("Refresh", "todo list")))
 }
